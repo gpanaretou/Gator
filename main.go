@@ -70,7 +70,6 @@ func main() {
 	var s state
 	cfg := config.Read()
 	s.cfg = &cfg
-	// user := "kokos"
 
 	cmds := commands{
 		available: make(map[string]func(*state, command) error),
