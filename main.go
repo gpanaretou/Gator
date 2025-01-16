@@ -34,6 +34,8 @@ func (c *commands) register(name string, f func(*state, command) error) {
 		c.available[name] = f
 	case "register":
 		c.available[name] = f
+	case "reset":
+		c.available[name] = f
 	}
 }
 
@@ -51,6 +53,11 @@ func (c *commands) run(s *state, cmd command) error {
 			return err
 		}
 	case "register":
+		err := c.available[cmd.name](s, cmd)
+		if err != nil {
+			return err
+		}
+	case "reset":
 		err := c.available[cmd.name](s, cmd)
 		if err != nil {
 			return err
@@ -110,6 +117,19 @@ func handlerRegister(s *state, cmd command) error {
 	return nil
 }
 
+func handlerReset(s *state, cmd command) error {
+	if len(cmd.args) != 0 {
+		return fmt.Errorf("reset requires no arguements")
+	}
+
+	err := s.db.DeleteAllUsers(context.Background())
+	if err != nil {
+		return err
+	}
+	fmt.Println("*SYSTEM: SUCCESSFULLY RESET DATABASE")
+	return nil
+}
+
 func main() {
 	var s state
 	cfg := config.Read()
@@ -121,6 +141,7 @@ func main() {
 	cmds.available["login"] = nil
 	cmds.register("login", handlerLogin)
 	cmds.register("register", handlerRegister)
+	cmds.register("reset", handlerReset)
 	args := os.Args
 
 	db, err := sql.Open("postgres", s.cfg.DbURL)
