@@ -14,3 +14,7 @@ WHERE name = $1 LIMIT 1;
 
 -- name: DeleteAllUsers :exec
 TRUNCATE TABLE users;
+
+-- name: GetUsers :many
+SELECT * from users
+ORDER BY name;

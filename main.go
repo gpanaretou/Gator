@@ -36,6 +36,8 @@ func (c *commands) register(name string, f func(*state, command) error) {
 		c.available[name] = f
 	case "reset":
 		c.available[name] = f
+	case "users":
+		c.available[name] = f
 	}
 }
 
@@ -58,6 +60,11 @@ func (c *commands) run(s *state, cmd command) error {
 			return err
 		}
 	case "reset":
+		err := c.available[cmd.name](s, cmd)
+		if err != nil {
+			return err
+		}
+	case "users":
 		err := c.available[cmd.name](s, cmd)
 		if err != nil {
 			return err
@@ -130,6 +137,25 @@ func handlerReset(s *state, cmd command) error {
 	return nil
 }
 
+func handlerUsers(s *state, cmd command) error {
+	if len(cmd.args) != 0 {
+		return fmt.Errorf("users requires not arguements")
+	}
+
+	users, err := s.db.GetUsers(context.Background())
+	if err != nil {
+		return err
+	}
+	for _, user := range users {
+		str := fmt.Sprintf("* %v", user.Name)
+		if s.cfg.CurrentUserName == user.Name {
+			str = str + " (current)"
+		}
+		fmt.Println(str)
+	}
+	return nil
+}
+
 func main() {
 	var s state
 	cfg := config.Read()
@@ -142,6 +168,7 @@ func main() {
 	cmds.register("login", handlerLogin)
 	cmds.register("register", handlerRegister)
 	cmds.register("reset", handlerReset)
+	cmds.register("users", handlerUsers)
 	args := os.Args
 
 	db, err := sql.Open("postgres", s.cfg.DbURL)
