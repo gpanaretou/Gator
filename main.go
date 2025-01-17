@@ -64,6 +64,10 @@ func (c *commands) register(name string, f func(*state, command) error) {
 		c.available[name] = f
 	case "feeds":
 		c.available[name] = f
+	case "follow":
+		c.available[name] = f
+	case "following":
+		c.available[name] = f
 	}
 
 }
@@ -107,6 +111,16 @@ func (c *commands) run(s *state, cmd command) error {
 			return err
 		}
 	case "feeds":
+		err := c.available[cmd.name](s, cmd)
+		if err != nil {
+			return err
+		}
+	case "follow":
+		err := c.available[cmd.name](s, cmd)
+		if err != nil {
+			return err
+		}
+	case "following":
 		err := c.available[cmd.name](s, cmd)
 		if err != nil {
 			return err
@@ -240,6 +254,18 @@ func handlerAddFeed(s *state, cmd command) error {
 		return fmt.Errorf("error executing query for creating new feed")
 	}
 
+	_, err = s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		UserID:    user_obj.ID,
+		FeedID:    feed.ID,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+
+	if err != nil {
+		return fmt.Errorf("could not create feed follow")
+	}
+
 	fmt.Println(feed)
 	return nil
 }
@@ -256,6 +282,58 @@ func handlerFeeds(s *state, cmd command) error {
 			return err
 		}
 		fmt.Printf("Name: %v, url: %v, user: %v\n", feed.Name, feed.Url, user.Name)
+	}
+	return nil
+}
+
+func handlerFollow(s *state, cmd command) error {
+	if len(cmd.args) != 1 {
+		return fmt.Errorf("follow expects one arguement: follow <url>")
+	}
+
+	current_user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
+	if err != nil {
+		return err
+	}
+
+	url := cmd.args[0]
+
+	feed, err := s.db.GetFeed(context.Background(), url)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		UserID:    current_user.ID,
+		FeedID:    feed.ID,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+	if err != nil {
+		return fmt.Errorf("%v already follows this source", current_user.Name)
+	}
+
+	fmt.Printf("User %v is now following %v\n", current_user.Name, feed.Url)
+	return nil
+}
+
+func handlerFollowing(s *state, cmd command) error {
+	if len(cmd.args) != 0 {
+		return fmt.Errorf("following does not expect any arguements")
+	}
+	current_user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
+	if err != nil {
+		return fmt.Errorf("error fetching user")
+	}
+
+	feeds, err := s.db.GetFeedFollowsForUser(context.Background(), current_user.ID)
+	if err != nil {
+		return fmt.Errorf("could not get feeds for user")
+	}
+
+	for i, feed := range feeds {
+		fmt.Printf("%v. feed name: %v, user: %v\n", i+1, feed.FeedName, feed.UserName)
 	}
 	return nil
 }
@@ -313,6 +391,8 @@ func main() {
 	cmds.register("agg", handlerAgg)
 	cmds.register("addfeed", handlerAddFeed)
 	cmds.register("feeds", handlerFeeds)
+	cmds.register("follow", handlerFollow)
+	cmds.register("following", handlerFollowing)
 	args := os.Args
 
 	db, err := sql.Open("postgres", s.cfg.DbURL)

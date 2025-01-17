@@ -13,3 +13,7 @@ RETURNING *;
 -- name: GetFeeds :many
 SELECT * FROM feeds
 ORDER BY user_id;
+
+-- name: GetFeed :one
+SELECT * FROM feeds
+WHERE url = $1 LIMIT 1;
