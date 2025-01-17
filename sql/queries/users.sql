@@ -13,7 +13,7 @@ SELECT * FROM users
 WHERE name = $1 LIMIT 1;
 
 -- name: DeleteAllUsers :exec
-TRUNCATE TABLE users;
+DELETE FROM users;
 
 -- name: GetUsers :many
 SELECT * from users

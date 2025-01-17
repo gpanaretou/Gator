@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/xml"
 	"fmt"
+	"html"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -13,6 +17,22 @@ import (
 	"github.com/gpanaretou/Gator/internal/database"
 	_ "github.com/lib/pq"
 )
+
+type RSSFeed struct {
+	Channel struct {
+		Title       string    `xml:"title"`
+		Link        string    `xml:"link"`
+		Description string    `xml:"description"`
+		Item        []RSSItem `xml:"item"`
+	} `xml:"channel"`
+}
+
+type RSSItem struct {
+	Title       string `xml:"title"`
+	Link        string `xml:"link"`
+	Description string `xml:"description"`
+	PubDate     string `xml:"pubDate"`
+}
 
 type state struct {
 	db  *database.Queries
@@ -38,7 +58,12 @@ func (c *commands) register(name string, f func(*state, command) error) {
 		c.available[name] = f
 	case "users":
 		c.available[name] = f
+	case "agg":
+		c.available[name] = f
+	case "addfeed":
+		c.available[name] = f
 	}
+
 }
 
 func (c *commands) run(s *state, cmd command) error {
@@ -65,6 +90,16 @@ func (c *commands) run(s *state, cmd command) error {
 			return err
 		}
 	case "users":
+		err := c.available[cmd.name](s, cmd)
+		if err != nil {
+			return err
+		}
+	case "agg":
+		err := c.available[cmd.name](s, cmd)
+		if err != nil {
+			return err
+		}
+	case "addfeed":
 		err := c.available[cmd.name](s, cmd)
 		if err != nil {
 			return err
@@ -156,6 +191,94 @@ func handlerUsers(s *state, cmd command) error {
 	return nil
 }
 
+func handlerAgg(s *state, cmd command) error {
+	// if len(cmd.args) != 1 {
+	// 	return fmt.Errorf("agg expects one arguement: agg <url>")
+	// }
+
+	// url := cmd.args[0]
+	url := "https://www.wagslane.dev/index.xml"
+	feed, err := fetchFeed(context.Background(), url)
+	if err != nil {
+		return err
+	}
+	fmt.Print(feed)
+	return nil
+}
+
+func handlerAddFeed(s *state, cmd command) error {
+	if len(cmd.args) != 2 {
+		return fmt.Errorf("addfeed expects one arguement: addfeed <name> <url>")
+	}
+
+	name := cmd.args[0]
+	url := cmd.args[1]
+
+	rss, err := fetchFeed(context.Background(), url)
+	if err != nil {
+		return err
+	}
+
+	current_user := s.cfg.CurrentUserName
+	user_obj, err := s.db.GetUser(context.Background(), current_user)
+	if err != nil {
+		return err
+	}
+
+	feed, err := s.db.CreateFeed(context.Background(), database.CreateFeedParams{
+		ID:        uuid.New(),
+		Name:      rss.Channel.Title,
+		Url:       name,
+		UserID:    user_obj.ID,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+
+	if err != nil {
+		return fmt.Errorf("error executing query for creating new feed")
+	}
+
+	fmt.Println(feed)
+	return nil
+}
+
+func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
+	client := &http.Client{}
+	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "gator")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var RSSFeed *RSSFeed
+
+	err = xml.Unmarshal(body, &RSSFeed)
+	if err != nil {
+		return nil, fmt.Errorf("something went wrong when trying to parse the XML feed")
+	}
+
+	RSSFeed.Channel.Title = html.UnescapeString(RSSFeed.Channel.Title)
+	RSSFeed.Channel.Description = html.UnescapeString(RSSFeed.Channel.Description)
+
+	for _, item := range RSSFeed.Channel.Item {
+		item.Title = html.UnescapeString(item.Title)
+		item.Description = html.UnescapeString(item.Description)
+	}
+
+	return RSSFeed, nil
+}
+
 func main() {
 	var s state
 	cfg := config.Read()
@@ -169,6 +292,8 @@ func main() {
 	cmds.register("register", handlerRegister)
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
+	cmds.register("agg", handlerAgg)
+	cmds.register("addfeed", handlerAddFeed)
 	args := os.Args
 
 	db, err := sql.Open("postgres", s.cfg.DbURL)
