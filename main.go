@@ -62,6 +62,8 @@ func (c *commands) register(name string, f func(*state, command) error) {
 		c.available[name] = f
 	case "addfeed":
 		c.available[name] = f
+	case "feeds":
+		c.available[name] = f
 	}
 
 }
@@ -100,6 +102,11 @@ func (c *commands) run(s *state, cmd command) error {
 			return err
 		}
 	case "addfeed":
+		err := c.available[cmd.name](s, cmd)
+		if err != nil {
+			return err
+		}
+	case "feeds":
 		err := c.available[cmd.name](s, cmd)
 		if err != nil {
 			return err
@@ -214,11 +221,6 @@ func handlerAddFeed(s *state, cmd command) error {
 	name := cmd.args[0]
 	url := cmd.args[1]
 
-	rss, err := fetchFeed(context.Background(), url)
-	if err != nil {
-		return err
-	}
-
 	current_user := s.cfg.CurrentUserName
 	user_obj, err := s.db.GetUser(context.Background(), current_user)
 	if err != nil {
@@ -227,8 +229,8 @@ func handlerAddFeed(s *state, cmd command) error {
 
 	feed, err := s.db.CreateFeed(context.Background(), database.CreateFeedParams{
 		ID:        uuid.New(),
-		Name:      rss.Channel.Title,
-		Url:       name,
+		Name:      name,
+		Url:       url,
 		UserID:    user_obj.ID,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -239,6 +241,22 @@ func handlerAddFeed(s *state, cmd command) error {
 	}
 
 	fmt.Println(feed)
+	return nil
+}
+
+func handlerFeeds(s *state, cmd command) error {
+	feeds, err := s.db.GetFeeds(context.Background())
+	if err != nil {
+		return err
+	}
+
+	for _, feed := range feeds {
+		user, err := s.db.GetUserFromID(context.Background(), feed.UserID)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Name: %v, url: %v, user: %v\n", feed.Name, feed.Url, user.Name)
+	}
 	return nil
 }
 
@@ -294,6 +312,7 @@ func main() {
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerAgg)
 	cmds.register("addfeed", handlerAddFeed)
+	cmds.register("feeds", handlerFeeds)
 	args := os.Args
 
 	db, err := sql.Open("postgres", s.cfg.DbURL)
