@@ -68,6 +68,8 @@ func (c *commands) register(name string, f func(*state, command) error) {
 		c.available[name] = f
 	case "following":
 		c.available[name] = f
+	case "unfollow":
+		c.available[name] = f
 	}
 
 }
@@ -121,6 +123,11 @@ func (c *commands) run(s *state, cmd command) error {
 			return err
 		}
 	case "following":
+		err := c.available[cmd.name](s, cmd)
+		if err != nil {
+			return err
+		}
+	case "unfollow":
 		err := c.available[cmd.name](s, cmd)
 		if err != nil {
 			return err
@@ -309,6 +316,29 @@ func handlerFollow(s *state, cmd command, user database.User) error {
 	return nil
 }
 
+func handlerUnfollow(s *state, cmd command, user database.User) error {
+	if len(cmd.args) != 1 {
+		return fmt.Errorf("was expecting a signle arguement: unfollow <url>")
+	}
+
+	url := cmd.args[0]
+
+	// check if user is subscribed to the feed
+	feed, err := s.db.GetFeed(context.Background(), url)
+	if err != nil {
+		return fmt.Errorf("user us not subscribed to: %v", url)
+	}
+
+	err = s.db.DeleteFeedFollow(context.Background(), feed.ID)
+	if err != nil {
+		return fmt.Errorf("something when trying unfollow %v", url)
+	}
+
+	fmt.Printf("> successfully unfollowed %v\n", feed.Url)
+
+	return nil
+}
+
 func handlerFollowing(s *state, cmd command, user database.User) error {
 	if len(cmd.args) != 0 {
 		return fmt.Errorf("following does not expect any arguements")
@@ -391,6 +421,7 @@ func main() {
 	cmds.register("feeds", handlerFeeds)
 	cmds.register("follow", middlewareLoggedIn(handlerFollow))
 	cmds.register("following", middlewareLoggedIn(handlerFollowing))
+	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
 	args := os.Args
 
 	db, err := sql.Open("postgres", s.cfg.DbURL)
