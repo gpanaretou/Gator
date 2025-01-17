@@ -227,7 +227,7 @@ func handlerAgg(s *state, cmd command) error {
 	return nil
 }
 
-func handlerAddFeed(s *state, cmd command) error {
+func handlerAddFeed(s *state, cmd command, user database.User) error {
 	if len(cmd.args) != 2 {
 		return fmt.Errorf("addfeed expects one arguement: addfeed <name> <url>")
 	}
@@ -235,28 +235,24 @@ func handlerAddFeed(s *state, cmd command) error {
 	name := cmd.args[0]
 	url := cmd.args[1]
 
-	current_user := s.cfg.CurrentUserName
-	user_obj, err := s.db.GetUser(context.Background(), current_user)
+	feed, err := s.db.GetFeed(context.Background(), url)
 	if err != nil {
-		return err
-	}
-
-	feed, err := s.db.CreateFeed(context.Background(), database.CreateFeedParams{
-		ID:        uuid.New(),
-		Name:      name,
-		Url:       url,
-		UserID:    user_obj.ID,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	})
-
-	if err != nil {
-		return fmt.Errorf("error executing query for creating new feed")
+		feed, err = s.db.CreateFeed(context.Background(), database.CreateFeedParams{
+			ID:        uuid.New(),
+			Name:      name,
+			Url:       url,
+			UserID:    user.ID,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		})
+		if err != nil {
+			return fmt.Errorf("could not find feed in DB, tried to create it but failed: url given %v", url)
+		}
 	}
 
 	_, err = s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
 		ID:        uuid.New(),
-		UserID:    user_obj.ID,
+		UserID:    user.ID,
 		FeedID:    feed.ID,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -286,54 +282,45 @@ func handlerFeeds(s *state, cmd command) error {
 	return nil
 }
 
-func handlerFollow(s *state, cmd command) error {
+func handlerFollow(s *state, cmd command, user database.User) error {
 	if len(cmd.args) != 1 {
 		return fmt.Errorf("follow expects one arguement: follow <url>")
-	}
-
-	current_user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
-	if err != nil {
-		return err
 	}
 
 	url := cmd.args[0]
 
 	feed, err := s.db.GetFeed(context.Background(), url)
 	if err != nil {
-		return err
+		return fmt.Errorf("could not get feed for %v", url)
 	}
 
 	_, err = s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
 		ID:        uuid.New(),
-		UserID:    current_user.ID,
+		UserID:    user.ID,
 		FeedID:    feed.ID,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	})
 	if err != nil {
-		return fmt.Errorf("%v already follows this source", current_user.Name)
+		return fmt.Errorf("%v already follows this source", user.Name)
 	}
 
-	fmt.Printf("User %v is now following %v\n", current_user.Name, feed.Url)
+	fmt.Printf("User %v is now following %v\n", user.Name, feed.Url)
 	return nil
 }
 
-func handlerFollowing(s *state, cmd command) error {
+func handlerFollowing(s *state, cmd command, user database.User) error {
 	if len(cmd.args) != 0 {
 		return fmt.Errorf("following does not expect any arguements")
 	}
-	current_user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
-	if err != nil {
-		return fmt.Errorf("error fetching user")
-	}
 
-	feeds, err := s.db.GetFeedFollowsForUser(context.Background(), current_user.ID)
+	feeds, err := s.db.GetFeedFollowsForUser(context.Background(), user.ID)
 	if err != nil {
 		return fmt.Errorf("could not get feeds for user")
 	}
 
 	for i, feed := range feeds {
-		fmt.Printf("%v. feed name: %v, user: %v\n", i+1, feed.FeedName, feed.UserName)
+		fmt.Printf("%v. feed name: %v\n", i+1, feed.FeedName)
 	}
 	return nil
 }
@@ -375,6 +362,17 @@ func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 	return RSSFeed, nil
 }
 
+func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
+	return func(s *state, cmd command) error {
+		current_user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
+		if err != nil {
+			return fmt.Errorf("could not get user")
+		}
+
+		return handler(s, cmd, current_user)
+	}
+}
+
 func main() {
 	var s state
 	cfg := config.Read()
@@ -389,10 +387,10 @@ func main() {
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerAgg)
-	cmds.register("addfeed", handlerAddFeed)
+	cmds.register("addfeed", middlewareLoggedIn(handlerAddFeed))
 	cmds.register("feeds", handlerFeeds)
-	cmds.register("follow", handlerFollow)
-	cmds.register("following", handlerFollowing)
+	cmds.register("follow", middlewareLoggedIn(handlerFollow))
+	cmds.register("following", middlewareLoggedIn(handlerFollowing))
 	args := os.Args
 
 	db, err := sql.Open("postgres", s.cfg.DbURL)
