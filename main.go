@@ -220,18 +220,25 @@ func handlerUsers(s *state, cmd command) error {
 }
 
 func handlerAgg(s *state, cmd command) error {
-	// if len(cmd.args) != 1 {
-	// 	return fmt.Errorf("agg expects one arguement: agg <url>")
-	// }
-
-	// url := cmd.args[0]
-	url := "https://www.wagslane.dev/index.xml"
-	feed, err := fetchFeed(context.Background(), url)
-	if err != nil {
-		return err
+	if len(cmd.args) != 1 {
+		return fmt.Errorf("agg expects one arguement: agg <time>\n i.e agg 1m30s")
 	}
-	fmt.Print(feed)
-	return nil
+
+	time_between_reqs := cmd.args[0]
+	timeBetweenReqs, err := time.ParseDuration(time_between_reqs)
+	if err != nil {
+		return fmt.Errorf("could not parse time between requests: try something like 1m30s")
+	}
+
+	lowest_time_for_update := 5 * time.Second
+	if timeBetweenReqs < lowest_time_for_update {
+		fmt.Printf("> tried to set a time interval every %v, lowset is %v\n", timeBetweenReqs.Seconds(), lowest_time_for_update)
+		timeBetweenReqs = lowest_time_for_update
+	}
+	ticker := time.NewTicker(timeBetweenReqs)
+	for ; ; <-ticker.C {
+		scrapeFeeds(s)
+	}
 }
 
 func handlerAddFeed(s *state, cmd command, user database.User) error {
@@ -388,8 +395,42 @@ func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 		item.Title = html.UnescapeString(item.Title)
 		item.Description = html.UnescapeString(item.Description)
 	}
-
 	return RSSFeed, nil
+}
+
+func scrapeFeeds(s *state) error {
+	num_of_feeds, err := s.db.GetTotalNumberOfFeeds(context.Background())
+	if err != nil {
+		return fmt.Errorf("could not get total number of feeds")
+	}
+
+	feeds_not_updated := 0
+	for i := 0; i < int(num_of_feeds); i++ {
+		next_feed, err := s.db.GetNextFeedToFetch(context.Background())
+		if err != nil {
+			return fmt.Errorf("could not fetch feed from db")
+		}
+
+		rssfeed, err := fetchFeed(context.Background(), next_feed.Url)
+		if err != nil {
+			feeds_not_updated += 1
+			return fmt.Errorf("%v could not be updated", next_feed.Url)
+		}
+
+		feed, err := s.db.MarkFeedFetched(context.Background(), database.MarkFeedFetchedParams{
+			ID: next_feed.ID,
+			LastFetchedAt: sql.NullTime{
+				Time:  time.Now(),
+				Valid: true,
+			},
+			UpdatedAt: time.Now(),
+		})
+		if err != nil {
+			return fmt.Errorf("could not update feed")
+		}
+		fmt.Printf("%v - %v was updated\n", feed.UpdatedAt, rssfeed.Channel.Title)
+	}
+	return nil
 }
 
 func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
