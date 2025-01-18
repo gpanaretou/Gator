@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -70,6 +71,8 @@ func (c *commands) register(name string, f func(*state, command) error) {
 		c.available[name] = f
 	case "unfollow":
 		c.available[name] = f
+	case "browse":
+		c.available[name] = f
 	}
 
 }
@@ -128,6 +131,11 @@ func (c *commands) run(s *state, cmd command) error {
 			return err
 		}
 	case "unfollow":
+		err := c.available[cmd.name](s, cmd)
+		if err != nil {
+			return err
+		}
+	case "browse":
 		err := c.available[cmd.name](s, cmd)
 		if err != nil {
 			return err
@@ -362,6 +370,40 @@ func handlerFollowing(s *state, cmd command, user database.User) error {
 	return nil
 }
 
+func handlerBrowse(s *state, cmd command, user database.User) error {
+	if len(cmd.args) > 1 {
+		return fmt.Errorf("browse accepts one arguement: brose <limit> (default is 2)")
+	}
+
+	var limit int32
+
+	if len(cmd.args) == 1 {
+		parsed_limit, err := strconv.Atoi(cmd.args[0])
+		if err != nil {
+			return fmt.Errorf("%v is not a valid limit for browse", cmd.args[0])
+		}
+		limit = int32(parsed_limit)
+	} else {
+		limit = 2
+	}
+
+	posts, err := s.db.GetPostsForUser(context.Background(), database.GetPostsForUserParams{
+		UserID: user.ID,
+		Limit:  int32(limit),
+	})
+	if err != nil {
+		return fmt.Errorf("could not retrieve posts for %v", user.Name)
+	}
+
+	for i, post := range posts {
+		fmt.Printf("%v. post:\n", i)
+		fmt.Printf("\t%v (published :%v)\n", post.Title, post.PublishedAt)
+		fmt.Printf("\t%v\n", post.Description)
+		fmt.Printf("-----END OF POST %v-----\n", i)
+	}
+	return nil
+}
+
 func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 	client := &http.Client{}
 	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
@@ -487,6 +529,7 @@ func main() {
 	cmds.register("follow", middlewareLoggedIn(handlerFollow))
 	cmds.register("following", middlewareLoggedIn(handlerFollowing))
 	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
+	cmds.register("browse", middlewareLoggedIn(handlerBrowse))
 	args := os.Args
 
 	db, err := sql.Open("postgres", s.cfg.DbURL)

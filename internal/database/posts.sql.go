@@ -79,7 +79,13 @@ INNER JOIN feeds ON posts.feed_id = feeds.id
 INNER JOIN feed_follows ON feeds.id = feed_follows.feed_id
 WHERE feed_follows.user_id = $1
 ORDER BY posts.published_at DESC
+LIMIT $2
 `
+
+type GetPostsForUserParams struct {
+	UserID uuid.UUID
+	Limit  int32
+}
 
 type GetPostsForUserRow struct {
 	ID          uuid.UUID
@@ -92,8 +98,8 @@ type GetPostsForUserRow struct {
 	FeedName    string
 }
 
-func (q *Queries) GetPostsForUser(ctx context.Context, userID uuid.UUID) ([]GetPostsForUserRow, error) {
-	rows, err := q.db.QueryContext(ctx, getPostsForUser, userID)
+func (q *Queries) GetPostsForUser(ctx context.Context, arg GetPostsForUserParams) ([]GetPostsForUserRow, error) {
+	rows, err := q.db.QueryContext(ctx, getPostsForUser, arg.UserID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
