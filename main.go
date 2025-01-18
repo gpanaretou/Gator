@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gpanaretou/Gator/internal/config"
 	"github.com/gpanaretou/Gator/internal/database"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 type RSSFeed struct {
@@ -427,6 +427,30 @@ func scrapeFeeds(s *state) error {
 		})
 		if err != nil {
 			return fmt.Errorf("could not update feed")
+		}
+
+		for _, item := range rssfeed.Channel.Item {
+			pub_date, _ := time.Parse(time.Now().String(), item.PubDate)
+			_, err := s.db.CreatePost(context.Background(), database.CreatePostParams{
+				ID:     uuid.New(),
+				FeedID: next_feed.ID,
+				Title:  item.Title,
+				Url:    item.Link,
+				Description: sql.NullString{
+					String: item.Description,
+					Valid:  true,
+				},
+				PublishedAt: pub_date,
+				CreatedAt:   time.Now(),
+				UpdatedAt:   time.Now(),
+			})
+			if err != nil {
+				if pqErr, ok := err.(*pq.Error); ok && pqErr.Constraint == "posts_url_key" {
+					// Skip printing the duplicate key error
+					continue
+				}
+				fmt.Println("ERROR: ", err)
+			}
 		}
 		fmt.Printf("%v - %v was updated\n", feed.UpdatedAt, rssfeed.Channel.Title)
 	}
