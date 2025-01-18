@@ -19,8 +19,9 @@ Once the requirements are installed and the config is set up, run:
 1. `go install`
 
 ## Usage
-1. `gator register user`
-2. `gator addfeed TechCrunch https://techcrunch.com/feed/`
+1. Register a user (no password option): `gator register user`
+2. Add a feed to follow: `gator addfeed TechCrunch https://techcrunch.com/feed/`
+3. Collect posts from feed: `gator agg 1m` (will update every 1m)
 
 ## Feeds to add
 - TechCrunch: https://techcrunch.com/feed/
