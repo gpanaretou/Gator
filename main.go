@@ -281,7 +281,7 @@ func handlerAddFeed(s *state, cmd command, user database.User) error {
 	})
 
 	if err != nil {
-		return fmt.Errorf("could not create feed follow")
+		return fmt.Errorf("you are already following %v, %v", name, url)
 	}
 
 	fmt.Println(feed)
